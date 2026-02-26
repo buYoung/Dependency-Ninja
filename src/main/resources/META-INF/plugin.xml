@@ -9,7 +9,8 @@
     <resource-bundle>messages.MyBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.github.buyoung.dependencyninja.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
-        <postStartupActivity implementation="com.github.buyoung.dependencyninja.startup.MyProjectActivity" />
+        <toolWindow factoryClass="com.github.buyoung.dependencyninja.features.dependencyToolwindow.presentation.DependencyToolWindowFactory" id="Dependency Ninja"/>
+        <postStartupActivity implementation="com.github.buyoung.dependencyninja.startup.DependencyNinjaProjectActivity" />
+        <annotator language="ANY" implementationClass="com.github.buyoung.dependencyninja.features.editorHighlight.presentation.DependencyOutdatedAnnotator" />
     </extensions>
 </idea-plugin>

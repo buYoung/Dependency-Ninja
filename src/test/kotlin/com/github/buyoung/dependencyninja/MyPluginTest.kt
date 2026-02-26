@@ -1,39 +1,32 @@
 package com.github.buyoung.dependencyninja
 
-import com.intellij.ide.highlighter.XmlFileType
-import com.intellij.openapi.components.service
-import com.intellij.psi.xml.XmlFile
-import com.intellij.testFramework.TestDataPath
-import com.intellij.testFramework.fixtures.BasePlatformTestCase
-import com.intellij.util.PsiErrorElementUtil
-import com.github.buyoung.dependencyninja.services.MyProjectService
+import com.github.buyoung.dependencyninja.core.shared.domain.VersionComparator
+import com.github.buyoung.dependencyninja.features.dependencyDiscovery.infrastructure.ManifestDependencyParser
+import junit.framework.TestCase.assertEquals
+import org.junit.Test
 
-@TestDataPath("\$CONTENT_ROOT/src/test/testData")
-class MyPluginTest : BasePlatformTestCase() {
+class MyPluginTest {
 
-    fun testXMLFile() {
-        val psiFile = myFixture.configureByText(XmlFileType.INSTANCE, "<foo>bar</foo>")
-        val xmlFile = assertInstanceOf(psiFile, XmlFile::class.java)
-
-        assertFalse(PsiErrorElementUtil.hasErrors(project, xmlFile.virtualFile))
-
-        assertNotNull(xmlFile.rootTag)
-
-        xmlFile.rootTag?.let {
-            assertEquals("foo", it.name)
-            assertEquals("bar", it.value.text)
-        }
+    @Test
+    fun testVersionComparator() {
+        assert(VersionComparator.compare("1.2.3", "1.3.0") < 0)
+        assert(VersionComparator.compare("2.0.0", "1.9.9") > 0)
+        assert(VersionComparator.compare("^1.2.3", "1.2.3") == 0)
     }
 
-    fun testRename() {
-        myFixture.testRename("foo.xml", "foo_after.xml", "a2")
+    @Test
+    fun testRequirementsParser() {
+        val text = "requests==2.31.0\nfastapi>=0.115.0"
+        val parser = ManifestDependencyParser()
+        val dependencies = parser.parse(
+            fileName = "requirements.txt",
+            text = text,
+            manifestPath = "/repo/requirements.txt",
+            moduleName = "repo",
+        )
+
+        assertEquals(2, dependencies.size)
+        assertEquals("requests", dependencies.first().coordinate.name)
+        assertEquals("2.31.0", dependencies.first().currentVersion)
     }
-
-    fun testProjectService() {
-        val projectService = project.service<MyProjectService>()
-
-        assertNotSame(projectService.getRandomNumber(), projectService.getRandomNumber())
-    }
-
-    override fun getTestDataPath() = "src/test/testData/rename"
 }
