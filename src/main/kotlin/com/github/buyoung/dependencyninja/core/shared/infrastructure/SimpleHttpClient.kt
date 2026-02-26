@@ -1,7 +1,8 @@
 package com.github.buyoung.dependencyninja.core.shared.infrastructure
 
+import com.github.buyoung.dependencyninja.core.shared.application.HttpClient
 import java.net.URI
-import java.net.http.HttpClient
+import java.net.http.HttpClient as JdkHttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
@@ -9,14 +10,14 @@ import java.util.concurrent.ConcurrentHashMap
 
 class SimpleHttpClient(
     private val ttlMillis: Long = 10 * 60 * 1000,
-) {
-    private val client = HttpClient.newBuilder()
+) : HttpClient {
+    private val client = JdkHttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(5))
         .build()
 
     private val cache = ConcurrentHashMap<String, CachedResponse>()
 
-    fun get(url: String): String? {
+    override fun get(url: String): String? {
         val now = System.currentTimeMillis()
         val cached = cache[url]
         if (cached != null && cached.expiresAt > now) {

@@ -9,6 +9,11 @@ enum class Ecosystem {
     GO,
 }
 
+enum class LookupChannel {
+    HTTP_REGISTRY,
+    PACKAGE_MANAGER,
+}
+
 enum class UpdateType {
     MAJOR,
     MINOR,

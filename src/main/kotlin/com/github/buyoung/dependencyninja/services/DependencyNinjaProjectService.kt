@@ -1,17 +1,20 @@
 package com.github.buyoung.dependencyninja.services
 
 import com.github.buyoung.dependencyninja.DependencyNinjaBundle
+import com.github.buyoung.dependencyninja.core.shared.application.HttpClient
 import com.github.buyoung.dependencyninja.core.shared.domain.DependencySnapshot
 import com.github.buyoung.dependencyninja.core.shared.domain.DependencyStatus
 import com.github.buyoung.dependencyninja.core.shared.domain.DependencyUpdate
+import com.github.buyoung.dependencyninja.core.shared.domain.Ecosystem
+import com.github.buyoung.dependencyninja.core.shared.domain.LookupChannel
 import com.github.buyoung.dependencyninja.core.shared.infrastructure.SimpleHttpClient
 import com.github.buyoung.dependencyninja.features.dependencyDiscovery.application.DependencyDiscoveryUseCase
 import com.github.buyoung.dependencyninja.features.dependencyDiscovery.infrastructure.ManifestDependencyParser
 import com.github.buyoung.dependencyninja.features.updateResolution.application.DependencyUpdateResolver
-import com.github.buyoung.dependencyninja.features.updateResolution.infrastructure.registry.GoProxyAdapter
-import com.github.buyoung.dependencyninja.features.updateResolution.infrastructure.registry.MavenCentralAdapter
-import com.github.buyoung.dependencyninja.features.updateResolution.infrastructure.registry.NpmRegistryAdapter
-import com.github.buyoung.dependencyninja.features.updateResolution.infrastructure.registry.PyPiRegistryAdapter
+import com.github.buyoung.dependencyninja.features.updateResolution.infrastructure.http.GoHttpVersionSource
+import com.github.buyoung.dependencyninja.features.updateResolution.infrastructure.http.MavenHttpVersionSource
+import com.github.buyoung.dependencyninja.features.updateResolution.infrastructure.http.NpmHttpVersionSource
+import com.github.buyoung.dependencyninja.features.updateResolution.infrastructure.http.PyPiHttpVersionSource
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer
 import com.intellij.notification.NotificationType
 import com.intellij.notification.Notifications
@@ -26,15 +29,16 @@ import java.util.concurrent.atomic.AtomicReference
 class DependencyNinjaProjectService(
     private val project: Project,
 ) {
-    private val httpClient = SimpleHttpClient()
+    private val httpClient: HttpClient = SimpleHttpClient()
     private val discoveryUseCase = DependencyDiscoveryUseCase(ManifestDependencyParser())
     private val resolver = DependencyUpdateResolver(
-        listOf(
-            NpmRegistryAdapter(httpClient),
-            PyPiRegistryAdapter(httpClient),
-            MavenCentralAdapter(httpClient),
-            GoProxyAdapter(httpClient),
+        sources = listOf(
+            NpmHttpVersionSource(httpClient),
+            PyPiHttpVersionSource(httpClient),
+            MavenHttpVersionSource(httpClient),
+            GoHttpVersionSource(httpClient),
         ),
+        defaultChannelByEcosystem = Ecosystem.entries.associateWith { LookupChannel.HTTP_REGISTRY },
     )
 
     private val snapshotRef = AtomicReference(DependencySnapshot(emptyList(), 0L))
