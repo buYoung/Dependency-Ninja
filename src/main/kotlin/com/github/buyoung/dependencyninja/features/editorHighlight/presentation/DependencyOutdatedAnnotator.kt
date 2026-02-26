@@ -1,5 +1,6 @@
 package com.github.buyoung.dependencyninja.features.editorHighlight.presentation
 
+import com.github.buyoung.dependencyninja.DependencyNinjaBundle
 import com.github.buyoung.dependencyninja.services.DependencyNinjaProjectService
 import com.intellij.lang.annotation.AnnotationHolder
 import com.intellij.lang.annotation.Annotator
@@ -19,7 +20,11 @@ class DependencyOutdatedAnnotator : Annotator {
             val range = update.declared.versionRange ?: return@forEach
             holder.newAnnotation(
                 HighlightSeverity.WARNING,
-                "${update.declared.coordinate.displayName()} can be updated to ${update.latestVersion}",
+                DependencyNinjaBundle.message(
+                    "annotator.updateAvailable",
+                    update.declared.coordinate.displayName(),
+                    update.latestVersion ?: "?",
+                ),
             )
                 .range(range)
                 .create()

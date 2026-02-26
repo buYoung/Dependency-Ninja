@@ -1,15 +1,16 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
     <id>com.github.buyoung.dependencyninja</id>
-    <name>Dependency-Ninja</name>
+    <name>%plugin.name</name>
+    <description>%plugin.description</description>
     <vendor>buyoung</vendor>
 
     <depends>com.intellij.modules.platform</depends>
 
-    <resource-bundle>messages.MyBundle</resource-bundle>
+    <resource-bundle>messages.DependencyNinjaBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.github.buyoung.dependencyninja.features.dependencyToolwindow.presentation.DependencyToolWindowFactory" id="Dependency Ninja"/>
+        <toolWindow factoryClass="com.github.buyoung.dependencyninja.features.dependencyToolwindow.presentation.DependencyToolWindowFactory" id="Dependency Ninja" stripeTitle="%toolwindow.stripeTitle"/>
         <postStartupActivity implementation="com.github.buyoung.dependencyninja.startup.DependencyNinjaProjectActivity" />
         <annotator language="ANY" implementationClass="com.github.buyoung.dependencyninja.features.editorHighlight.presentation.DependencyOutdatedAnnotator" />
     </extensions>

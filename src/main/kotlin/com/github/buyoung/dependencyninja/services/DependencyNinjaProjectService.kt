@@ -1,5 +1,6 @@
 package com.github.buyoung.dependencyninja.services
 
+import com.github.buyoung.dependencyninja.DependencyNinjaBundle
 import com.github.buyoung.dependencyninja.core.shared.domain.DependencySnapshot
 import com.github.buyoung.dependencyninja.core.shared.domain.DependencyStatus
 import com.github.buyoung.dependencyninja.core.shared.domain.DependencyUpdate
@@ -64,9 +65,9 @@ class DependencyNinjaProjectService(
                     val outdatedCount = updates.count { it.status == DependencyStatus.OUTDATED }
                     Notifications.Bus.notify(
                         com.intellij.notification.Notification(
-                            "Dependency Ninja",
-                            "Dependency scan finished",
-                            "Outdated dependencies: $outdatedCount",
+                            DependencyNinjaBundle.message("notification.title"),
+                            DependencyNinjaBundle.message("notification.scanFinished"),
+                            DependencyNinjaBundle.message("notification.outdatedCount", outdatedCount),
                             NotificationType.INFORMATION,
                         ),
                         project,

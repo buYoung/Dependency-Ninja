@@ -1,5 +1,6 @@
 package com.github.buyoung.dependencyninja.features.dependencyToolwindow.presentation
 
+import com.github.buyoung.dependencyninja.DependencyNinjaBundle
 import com.github.buyoung.dependencyninja.core.shared.domain.DependencyStatus
 import com.github.buyoung.dependencyninja.services.DependencyNinjaProjectService
 import com.intellij.openapi.components.service
@@ -28,14 +29,14 @@ class DependencyToolWindowFactory : ToolWindowFactory {
 
 private class DependencyToolWindowPanel(project: Project) : JPanel(BorderLayout()) {
     private val service = project.service<DependencyNinjaProjectService>()
-    private val rootNode = DefaultMutableTreeNode("Dependencies")
+    private val rootNode = DefaultMutableTreeNode(DependencyNinjaBundle.message("toolwindow.root"))
     private val treeModel = DefaultTreeModel(rootNode)
     private val tree = JTree(treeModel)
 
     init {
         service.addSnapshotListener { refreshTree() }
 
-        val refreshButton = JButton("Refresh")
+        val refreshButton = JButton(DependencyNinjaBundle.message("toolwindow.refresh"))
         refreshButton.addActionListener {
             service.refreshInBackground(showNotification = true)
         }
@@ -57,9 +58,9 @@ private class DependencyToolWindowPanel(project: Project) : JPanel(BorderLayout(
                 val ecosystemNode = DefaultMutableTreeNode(ecosystem.name)
                 ecosystemUpdates.sortedBy { it.declared.coordinate.displayName() }.forEach { update ->
                     val marker = when (update.status) {
-                        DependencyStatus.OUTDATED -> "OUTDATED"
-                        DependencyStatus.UP_TO_DATE -> "UP-TO-DATE"
-                        DependencyStatus.UNKNOWN -> "UNKNOWN"
+                        DependencyStatus.OUTDATED -> DependencyNinjaBundle.message("status.outdated")
+                        DependencyStatus.UP_TO_DATE -> DependencyNinjaBundle.message("status.upToDate")
+                        DependencyStatus.UNKNOWN -> DependencyNinjaBundle.message("status.unknown")
                     }
                     val label = buildString {
                         append(update.declared.coordinate.displayName())
