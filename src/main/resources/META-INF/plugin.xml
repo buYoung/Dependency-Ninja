@@ -1,4 +1,3 @@
-<!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
     <id>com.github.buyoung.dependencyninja</id>
     <name>%plugin.name</name>
@@ -10,8 +9,27 @@
     <resource-bundle>messages.DependencyNinjaBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.github.buyoung.dependencyninja.features.dependencyToolwindow.presentation.DependencyToolWindowFactory" id="Dependency Ninja" stripeTitle="%toolwindow.stripeTitle"/>
-        <postStartupActivity implementation="com.github.buyoung.dependencyninja.startup.DependencyNinjaProjectActivity" />
-        <annotator language="ANY" implementationClass="com.github.buyoung.dependencyninja.features.editorHighlight.presentation.DependencyOutdatedAnnotator" />
+        <projectService serviceImplementation="com.github.buyoung.dependencyninja.services.DependencyNinjaProjectService"/>
+        <projectService serviceImplementation="com.github.buyoung.dependencyninja.features.settings.application.PolicyProfileService"/>
+        <projectService serviceImplementation="com.github.buyoung.dependencyninja.features.updateWorkflow.application.UpdatePreviewService"/>
+
+        <toolWindow
+                id="Dependency Ninja"
+                stripeTitle="%toolwindow.stripeTitle"
+                factoryClass="com.github.buyoung.dependencyninja.features.dependencyToolwindow.presentation.DependencyToolWindowFactory"/>
+        <postStartupActivity implementation="com.github.buyoung.dependencyninja.startup.DependencyNinjaProjectActivity"/>
+        <annotator language="ANY" implementationClass="com.github.buyoung.dependencyninja.features.editorHighlight.presentation.DependencyOutdatedAnnotator"/>
+        <localInspection
+                shortName="DependencyRecommendationInspection"
+                displayName="%inspection.displayName"
+                groupPath="Dependency Ninja"
+                enabledByDefault="true"
+                language="JSON"
+                level="WARNING"
+                implementationClass="com.github.buyoung.dependencyninja.features.inspection.presentation.DependencyRecommendationInspection"/>
+        <projectConfigurable
+                id="dependency.ninja.settings"
+                displayName="%settings.displayName"
+                instance="com.github.buyoung.dependencyninja.features.settings.presentation.DependencyNinjaConfigurable"/>
     </extensions>
 </idea-plugin>

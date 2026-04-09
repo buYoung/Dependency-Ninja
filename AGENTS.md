@@ -55,3 +55,10 @@ Dependency Ninja is an IntelliJ Platform plugin that discovers dependencies from
 - After code changes, run type-check: `./gradlew compileKotlin`.
 - Keep new functions/modules single-purpose and colocated near related code.
 - Avoid new external dependencies unless clearly necessary; when added, explain why.
+
+## Active Technologies
+- Kotlin on JVM 21 + IntelliJ Platform Gradle Plugin, Kotlin, JDK (002-dependency-intelligence-plugin)
+- In-memory project snapshot plus IDE-local cache files for registry (002-dependency-intelligence-plugin)
+
+## Recent Changes
+- 002-dependency-intelligence-plugin: Added Kotlin on JVM 21 + IntelliJ Platform Gradle Plugin, Kotlin, JDK

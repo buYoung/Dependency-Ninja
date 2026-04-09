@@ -18,18 +18,33 @@ class SimpleHttpClient(
     private val cache = ConcurrentHashMap<String, CachedResponse>()
 
     override fun get(url: String): String? {
+        return execute(url = url, body = null)
+    }
+
+    override fun post(url: String, body: String): String? {
+        return execute(url = url, body = body)
+    }
+
+    private fun execute(url: String, body: String?): String? {
         val now = System.currentTimeMillis()
-        val cached = cache[url]
-        if (cached != null && cached.expiresAt > now) {
+        val cacheKey = if (body == null) "GET:$url" else "POST:$url:$body"
+        val cached = cache[cacheKey]
+        if (body == null && cached != null && cached.expiresAt > now) {
             return cached.body
         }
 
-        val request = HttpRequest.newBuilder()
+        val requestBuilder = HttpRequest.newBuilder()
             .uri(URI.create(url))
             .timeout(Duration.ofSeconds(10))
             .header("Accept", "application/json")
-            .GET()
-            .build()
+        val request = if (body == null) {
+            requestBuilder.GET().build()
+        } else {
+            requestBuilder
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build()
+        }
 
         val response = runCatching {
             client.send(request, HttpResponse.BodyHandlers.ofString())
@@ -39,9 +54,11 @@ class SimpleHttpClient(
             return null
         }
 
-        val body = response.body()
-        cache[url] = CachedResponse(body = body, expiresAt = now + ttlMillis)
-        return body
+        val responseBody = response.body()
+        if (request.method() == "GET") {
+            cache[cacheKey] = CachedResponse(body = responseBody, expiresAt = now + ttlMillis)
+        }
+        return responseBody
     }
 
     private data class CachedResponse(

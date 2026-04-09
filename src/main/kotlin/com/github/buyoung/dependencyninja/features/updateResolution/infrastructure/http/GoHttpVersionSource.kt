@@ -9,6 +9,7 @@ import com.github.buyoung.dependencyninja.core.shared.domain.VersionComparator
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
+@Deprecated("out of v1.0 scope")
 class GoHttpVersionSource(
     private val httpClient: HttpClient,
 ) : VersionSource {
