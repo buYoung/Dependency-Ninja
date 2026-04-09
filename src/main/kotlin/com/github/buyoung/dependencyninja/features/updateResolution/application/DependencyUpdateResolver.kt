@@ -1,6 +1,8 @@
 package com.github.buyoung.dependencyninja.features.updateResolution.application
 
 import com.github.buyoung.dependencyninja.core.shared.application.VersionSource
+import com.github.buyoung.dependencyninja.core.shared.domain.AdvisoryRecord
+import com.github.buyoung.dependencyninja.core.shared.domain.DependencyCoordinate
 import com.github.buyoung.dependencyninja.core.shared.domain.DependencyDeclaration
 import com.github.buyoung.dependencyninja.core.shared.domain.DependencyStatus
 import com.github.buyoung.dependencyninja.core.shared.domain.FreshnessState
@@ -8,15 +10,21 @@ import com.github.buyoung.dependencyninja.core.shared.domain.ReasonCode
 import com.github.buyoung.dependencyninja.core.shared.domain.RecommendationRecord
 import com.github.buyoung.dependencyninja.core.shared.domain.ReleaseAgePolicySource
 import com.github.buyoung.dependencyninja.core.shared.domain.ReleaseAgeRule
+import com.github.buyoung.dependencyninja.core.shared.domain.RegistryObservation
+import com.github.buyoung.dependencyninja.core.shared.domain.SurfaceAvailability
+import com.github.buyoung.dependencyninja.core.shared.domain.UpdateType
 import com.github.buyoung.dependencyninja.core.shared.domain.VersionComparator
 import com.github.buyoung.dependencyninja.core.shared.domain.WorkspaceReference
+import com.github.buyoung.dependencyninja.core.shared.infrastructure.BackgroundExecution
 import com.github.buyoung.dependencyninja.features.settings.application.PolicyProfileService
+import com.github.buyoung.dependencyninja.features.settings.domain.PolicyProfile
 import com.github.buyoung.dependencyninja.features.settings.domain.StabilityChannel
 import com.github.buyoung.dependencyninja.features.updateResolution.infrastructure.advisory.OsvAdvisoryClient
 import com.github.buyoung.dependencyninja.features.updateResolution.infrastructure.packageManager.PackageManagerReleaseAgeReader
 import com.intellij.openapi.project.Project
 import java.time.Duration
 import java.time.Instant
+import java.util.concurrent.Semaphore
 
 class DependencyUpdateResolver(
     private val project: Project,
@@ -33,26 +41,70 @@ class DependencyUpdateResolver(
     ): List<RecommendationRecord> {
         val profile = policyProfileService.currentProfile()
         val workspaceReferenceById = workspaceReferences.associateBy { it.workspaceReferenceId }
+        val packageInsights = loadPackageInsights(
+            coordinates = (workspaceReferences.map { it.coordinate } + declarations.map { it.coordinate })
+                .distinctBy(::packageKey),
+        )
         val recommendations = mutableListOf<RecommendationRecord>()
 
         workspaceReferences.forEach { workspaceReference ->
-            recommendations += resolveWorkspaceReference(workspaceReference, profile)
+            recommendations += resolveWorkspaceReference(
+                workspaceReference = workspaceReference,
+                packageInsight = packageInsights[packageKey(workspaceReference.coordinate)] ?: PackageInsight.empty(workspaceReference.coordinate.name),
+                profile = profile,
+            )
         }
 
         declarations.forEach { declaration ->
-            recommendations += resolveDeclaration(declaration, workspaceReferenceById[declaration.workspaceReferenceId], profile)
+            val workspaceReference = workspaceReferenceById[declaration.workspaceReferenceId]
+            val effectiveCoordinate = workspaceReference?.coordinate ?: declaration.coordinate
+            recommendations += resolveDeclaration(
+                declaration = declaration,
+                workspaceReference = workspaceReference,
+                packageInsight = packageInsights[packageKey(effectiveCoordinate)] ?: PackageInsight.empty(declaration.packageName),
+                profile = profile,
+            )
         }
 
         return recommendations
     }
 
+    private fun loadPackageInsights(
+        coordinates: List<DependencyCoordinate>,
+    ): Map<String, PackageInsight> {
+        val semaphore = Semaphore(MAX_CONCURRENT_PACKAGE_LOOKUPS)
+        val futuresByPackageKey = coordinates.associateBy(::packageKey).mapValues { (_, coordinate) ->
+            BackgroundExecution.submit {
+                semaphore.acquire()
+                try {
+                    val observation = sourceByEcosystem[coordinate.ecosystem]?.resolveRegistryObservation(coordinate)
+                    val advisoryLookup = if (coordinate.ecosystem == com.github.buyoung.dependencyninja.core.shared.domain.Ecosystem.NPM) {
+                        advisoryClient.lookup(coordinate.name)
+                    } else {
+                        com.github.buyoung.dependencyninja.features.updateResolution.infrastructure.advisory.AdvisoryLookupResult(
+                            records = emptyList(),
+                            freshnessState = FreshnessState.UNAVAILABLE,
+                        )
+                    }
+                    PackageInsight(
+                        observation = observation,
+                        advisories = advisoryLookup.records,
+                        advisoryFreshnessState = advisoryLookup.freshnessState,
+                    )
+                } finally {
+                    semaphore.release()
+                }
+            }
+        }
+
+        return futuresByPackageKey.mapValues { (_, future) -> future.get() }
+    }
+
     private fun resolveWorkspaceReference(
         workspaceReference: WorkspaceReference,
-        profile: com.github.buyoung.dependencyninja.features.settings.domain.PolicyProfile,
+        packageInsight: PackageInsight,
+        profile: PolicyProfile,
     ): RecommendationRecord {
-        val observation = sourceByEcosystem[workspaceReference.coordinate.ecosystem]
-            ?.resolveRegistryObservation(workspaceReference.coordinate)
-        val advisories = advisoryClient.lookup(workspaceReference.packageName).records
         return buildRecommendation(
             declarationId = workspaceReference.workspaceReferenceId,
             packageName = workspaceReference.packageName,
@@ -67,24 +119,22 @@ class DependencyUpdateResolver(
             targetDeclaredVersionText = workspaceReference.declaredVersionText,
             workspaceReferenceId = workspaceReference.workspaceReferenceId,
             isEditableTarget = true,
-            observation = observation,
-            advisories = advisories,
+            packageInsight = packageInsight,
             profile = profile,
             extraReasons = emptySet(),
-            advisorySummary = advisories.firstOrNull()?.summary,
         )
     }
 
     private fun resolveDeclaration(
         declaration: DependencyDeclaration,
         workspaceReference: WorkspaceReference?,
-        profile: com.github.buyoung.dependencyninja.features.settings.domain.PolicyProfile,
+        packageInsight: PackageInsight,
+        profile: PolicyProfile,
     ): RecommendationRecord {
-        val effectiveCoordinate = workspaceReference?.coordinate ?: declaration.coordinate
-        val effectiveCurrentVersion = workspaceReference?.normalizedCurrentVersion ?: declaration.normalizedCurrentVersion ?: declaration.declaredVersionText
+        val effectiveCurrentVersion = workspaceReference?.normalizedCurrentVersion
+            ?: declaration.normalizedCurrentVersion
+            ?: declaration.declaredVersionText
         val effectiveDeclaredText = workspaceReference?.declaredVersionText ?: declaration.declaredVersionText
-        val observation = sourceByEcosystem[effectiveCoordinate.ecosystem]?.resolveRegistryObservation(effectiveCoordinate)
-        val advisories = advisoryClient.lookup(declaration.packageName).records
         val extraReasons = buildSet {
             if (workspaceReference != null) {
                 add(ReasonCode.SHARED_REFERENCE_TAKES_PRECEDENCE)
@@ -104,11 +154,9 @@ class DependencyUpdateResolver(
             targetDeclaredVersionText = effectiveDeclaredText,
             workspaceReferenceId = declaration.workspaceReferenceId,
             isEditableTarget = declaration.isEditableTarget,
-            observation = observation,
-            advisories = advisories,
+            packageInsight = packageInsight,
             profile = profile,
             extraReasons = extraReasons,
-            advisorySummary = advisories.firstOrNull()?.summary,
         )
     }
 
@@ -119,21 +167,19 @@ class DependencyUpdateResolver(
         declaredVersionText: String,
         sourceManifestPath: String,
         moduleName: String,
-        coordinate: com.github.buyoung.dependencyninja.core.shared.domain.DependencyCoordinate,
+        coordinate: DependencyCoordinate,
         versionRange: com.intellij.openapi.util.TextRange?,
         targetManifestPath: String,
         targetVersionRange: com.intellij.openapi.util.TextRange?,
         targetDeclaredVersionText: String,
         workspaceReferenceId: String?,
         isEditableTarget: Boolean,
-        observation: com.github.buyoung.dependencyninja.core.shared.domain.RegistryObservation?,
-        advisories: List<com.github.buyoung.dependencyninja.core.shared.domain.AdvisoryRecord>,
-        profile: com.github.buyoung.dependencyninja.features.settings.domain.PolicyProfile,
+        packageInsight: PackageInsight,
+        profile: PolicyProfile,
         extraReasons: Set<ReasonCode>,
-        advisorySummary: String?,
     ): RecommendationRecord {
         val reasons = linkedSetOf<ReasonCode>().apply { addAll(extraReasons) }
-        val effectiveObservation = observation ?: com.github.buyoung.dependencyninja.core.shared.domain.RegistryObservation(
+        val effectiveObservation = packageInsight.observation ?: RegistryObservation(
             packageName = packageName,
             registryUrl = "",
             availableVersions = emptyList(),
@@ -161,7 +207,8 @@ class DependencyUpdateResolver(
                 targetManifestPath = targetManifestPath,
                 targetVersionRange = targetVersionRange,
                 targetDeclaredVersionText = targetDeclaredVersionText,
-                advisorySummary = advisorySummary,
+                advisories = packageInsight.advisories,
+                advisorySummary = packageInsight.summary,
                 surfaceAvailability = profile.presentationToggles,
             )
         }
@@ -186,7 +233,8 @@ class DependencyUpdateResolver(
                 targetManifestPath = targetManifestPath,
                 targetVersionRange = targetVersionRange,
                 targetDeclaredVersionText = targetDeclaredVersionText,
-                advisorySummary = advisorySummary,
+                advisories = packageInsight.advisories,
+                advisorySummary = packageInsight.summary,
                 surfaceAvailability = profile.presentationToggles,
             )
         }
@@ -227,7 +275,7 @@ class DependencyUpdateResolver(
                 add(ReasonCode.RELEASE_AGE_BLOCKED)
             }
         }
-        val advisoryFlagged = advisories.isNotEmpty()
+        val advisoryFlagged = packageInsight.advisories.isNotEmpty()
         if (advisoryFlagged) {
             reasons += ReasonCode.ADVISORY_FLAGGED
         }
@@ -269,7 +317,8 @@ class DependencyUpdateResolver(
                 targetManifestPath = targetManifestPath,
                 targetVersionRange = targetVersionRange,
                 targetDeclaredVersionText = targetDeclaredVersionText,
-                advisorySummary = advisorySummary,
+                advisories = packageInsight.advisories,
+                advisorySummary = packageInsight.summary,
                 surfaceAvailability = profile.presentationToggles,
             )
         }
@@ -305,7 +354,8 @@ class DependencyUpdateResolver(
             targetManifestPath = targetManifestPath,
             targetVersionRange = targetVersionRange,
             targetDeclaredVersionText = targetDeclaredVersionText,
-            advisorySummary = advisorySummary,
+            advisories = packageInsight.advisories,
+            advisorySummary = packageInsight.summary,
             surfaceAvailability = profile.presentationToggles,
         )
     }
@@ -322,7 +372,7 @@ class DependencyUpdateResolver(
     private fun recommendation(
         declarationId: String,
         workspaceReferenceId: String?,
-        coordinate: com.github.buyoung.dependencyninja.core.shared.domain.DependencyCoordinate,
+        coordinate: DependencyCoordinate,
         packageName: String,
         sourceManifestPath: String,
         moduleName: String,
@@ -337,8 +387,9 @@ class DependencyUpdateResolver(
         targetManifestPath: String,
         targetVersionRange: com.intellij.openapi.util.TextRange?,
         targetDeclaredVersionText: String,
+        advisories: List<AdvisoryRecord>,
         advisorySummary: String?,
-        surfaceAvailability: com.github.buyoung.dependencyninja.core.shared.domain.SurfaceAvailability,
+        surfaceAvailability: SurfaceAvailability,
     ): RecommendationRecord {
         return RecommendationRecord(
             recommendationId = "$sourceManifestPath::$declarationId",
@@ -360,13 +411,18 @@ class DependencyUpdateResolver(
             targetManifestPath = targetManifestPath,
             targetVersionRange = targetVersionRange,
             targetDeclaredVersionText = targetDeclaredVersionText,
+            advisories = advisories,
             advisorySummary = advisorySummary,
             updateType = if (recommendedVersion == null) {
-                com.github.buyoung.dependencyninja.core.shared.domain.UpdateType.UNKNOWN
+                UpdateType.UNKNOWN
             } else {
                 VersionComparator.classifyUpdate(currentVersion, recommendedVersion)
             },
         )
+    }
+
+    private fun packageKey(coordinate: DependencyCoordinate): String {
+        return "${coordinate.ecosystem.name}:${coordinate.name}"
     }
 
     private data class CandidatePolicyCheck(
@@ -376,5 +432,48 @@ class DependencyUpdateResolver(
     ) {
         val isAllowed: Boolean
             get() = prereleaseAllowed && ageAllowed
+    }
+
+    private data class PackageInsight(
+        val observation: RegistryObservation?,
+        val advisories: List<AdvisoryRecord>,
+        val advisoryFreshnessState: FreshnessState,
+    ) {
+        val summary: String?
+            get() = advisories.firstOrNull()?.let { advisory ->
+                buildString {
+                    append(advisory.severityLabel)
+                    append(" · ")
+                    append(advisory.advisoryId)
+                    if (advisory.summary.isNotBlank()) {
+                        append(" · ")
+                        append(advisory.summary)
+                    }
+                    if (advisory.fixedVersions.isNotEmpty()) {
+                        append(" · fixed ")
+                        append(advisory.fixedVersions.joinToString(", "))
+                    }
+                }
+            }
+
+        companion object {
+            fun empty(packageName: String): PackageInsight {
+                return PackageInsight(
+                    observation = RegistryObservation(
+                        packageName = packageName,
+                        registryUrl = "",
+                        availableVersions = emptyList(),
+                        fetchedAt = null,
+                        freshnessState = FreshnessState.UNAVAILABLE,
+                    ),
+                    advisories = emptyList(),
+                    advisoryFreshnessState = FreshnessState.UNAVAILABLE,
+                )
+            }
+        }
+    }
+
+    companion object {
+        private const val MAX_CONCURRENT_PACKAGE_LOOKUPS = 6
     }
 }

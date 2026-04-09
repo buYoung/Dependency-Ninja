@@ -147,6 +147,7 @@ data class RecommendationRecord(
     val targetVersionRange: TextRange?,
     val targetDeclaredVersionText: String,
     val advisorySummary: String? = null,
+    val advisories: List<AdvisoryRecord> = emptyList(),
     val updateType: UpdateType = UpdateType.UNKNOWN,
 )
 

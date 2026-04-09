@@ -12,6 +12,7 @@ import com.github.buyoung.dependencyninja.features.dependencyDiscovery.infrastru
 import com.github.buyoung.dependencyninja.features.settings.application.PolicyProfileService
 import com.github.buyoung.dependencyninja.features.updateResolution.application.DependencyUpdateResolver
 import com.github.buyoung.dependencyninja.features.updateResolution.infrastructure.advisory.OsvAdvisoryClient
+import com.github.buyoung.dependencyninja.features.updateResolution.infrastructure.advisory.AdvisoryResponseCache
 import com.github.buyoung.dependencyninja.features.updateResolution.infrastructure.cache.RegistryResponseCache
 import com.github.buyoung.dependencyninja.features.updateResolution.infrastructure.http.NpmHttpVersionSource
 import com.github.buyoung.dependencyninja.features.updateResolution.infrastructure.packageManager.PackageManagerReleaseAgeReader
@@ -31,6 +32,7 @@ class DependencyNinjaProjectService(
 ) {
     private val httpClient: HttpClient = SimpleHttpClient()
     private val registryResponseCache = RegistryResponseCache()
+    private val advisoryResponseCache = AdvisoryResponseCache()
     private val discoveryUseCase = DependencyDiscoveryUseCase(ManifestDependencyParser())
     private val policyProfileService by lazy { project.service<PolicyProfileService>() }
     private val resolver by lazy {
@@ -38,7 +40,7 @@ class DependencyNinjaProjectService(
             project = project,
             sources = listOf(NpmHttpVersionSource(httpClient, registryResponseCache)),
             policyProfileService = policyProfileService,
-            advisoryClient = OsvAdvisoryClient(httpClient),
+            advisoryClient = OsvAdvisoryClient(httpClient, advisoryResponseCache),
             packageManagerReleaseAgeReader = PackageManagerReleaseAgeReader(),
         )
     }

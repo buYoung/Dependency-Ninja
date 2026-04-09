@@ -1,10 +1,10 @@
 package com.github.buyoung.dependencyninja.features.dependencyToolwindow.presentation
 
 import com.github.buyoung.dependencyninja.DependencyNinjaBundle
+import com.github.buyoung.dependencyninja.core.shared.domain.AdvisoryRecord
 import com.github.buyoung.dependencyninja.core.shared.domain.RecommendationRecord
 import com.github.buyoung.dependencyninja.core.shared.domain.hasRecommendedUpgrade
 import com.github.buyoung.dependencyninja.core.shared.domain.shouldAppearInToolWindowByDefault
-import com.github.buyoung.dependencyninja.core.shared.domain.supportsUpdateAction
 import com.github.buyoung.dependencyninja.core.shared.domain.visibleReasonCodes
 import com.github.buyoung.dependencyninja.features.updateWorkflow.application.UpdatePreviewService
 import com.github.buyoung.dependencyninja.features.updateWorkflow.domain.UpdateExecutionMode
@@ -22,13 +22,13 @@ import com.intellij.ui.content.ContentFactory
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.GridLayout
-import javax.swing.DefaultListCellRenderer
 import javax.swing.DefaultListModel
 import javax.swing.JButton
 import javax.swing.JList
 import javax.swing.JPanel
 import javax.swing.JTextArea
 import javax.swing.ListSelectionModel
+import javax.swing.border.EmptyBorder
 
 class DependencyToolWindowFactory : ToolWindowFactory {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
@@ -40,7 +40,9 @@ class DependencyToolWindowFactory : ToolWindowFactory {
     override fun shouldBeAvailable(project: Project): Boolean = true
 }
 
-private class DependencyToolWindowPanel(project: Project) : JPanel(BorderLayout()) {
+private class DependencyToolWindowPanel(
+    private val project: Project,
+) : JPanel(BorderLayout()) {
     private val service = project.service<DependencyNinjaProjectService>()
     private val previewService = project.service<UpdatePreviewService>()
     private val listModel = DefaultListModel<RecommendationRecord>()
@@ -145,7 +147,7 @@ private class DependencyToolWindowPanel(project: Project) : JPanel(BorderLayout(
     private fun formatRecommendationRow(recommendation: RecommendationRecord): String {
         val manifestName = recommendation.sourceManifestPath.substringAfterLast('/')
         val statusLabel = DependencyNinjaBundle.message("status.${recommendation.status.name.lowercase()}")
-        return if (recommendation.hasRecommendedUpgrade()) {
+        val primaryLine = if (recommendation.hasRecommendedUpgrade()) {
             DependencyNinjaBundle.message(
                 "toolwindow.row.withUpgrade",
                 recommendation.packageName,
@@ -163,27 +165,101 @@ private class DependencyToolWindowPanel(project: Project) : JPanel(BorderLayout(
                 manifestName,
             )
         }
+        val secondaryLine = buildRiskSummaryLine(recommendation)
+        return if (secondaryLine == null) {
+            primaryLine
+        } else {
+            primaryLine + "\n" + secondaryLine
+        }
+    }
+
+    private fun buildRiskSummaryLine(recommendation: RecommendationRecord): String? {
+        if (recommendation.status != com.github.buyoung.dependencyninja.core.shared.domain.DependencyStatus.RISKY) {
+            return null
+        }
+        val advisory = recommendation.advisories.firstOrNull() ?: return recommendation.advisorySummary
+        val summary = truncateForRow(advisory.summary)
+        return DependencyNinjaBundle.message(
+            "toolwindow.row.riskSummary",
+            advisory.severityLabel,
+            advisory.advisoryId,
+            summary,
+        )
     }
 
     private fun formatRecommendationDetail(recommendation: RecommendationRecord): String {
-        val reasonSummary = recommendation.visibleReasonCodes()
-            .joinToString(", ") { DependencyNinjaBundle.message("reason.${it.name.lowercase()}") }
-            .ifBlank { DependencyNinjaBundle.message("reason.none") }
         val recommendedVersion = recommendation.recommendedVersion ?: DependencyNinjaBundle.message("status.none")
         val editability = if (recommendation.isEditableTarget) {
             DependencyNinjaBundle.message("toolwindow.editable")
         } else {
             DependencyNinjaBundle.message("toolwindow.reviewOnly")
         }
+        val relativeManifestPath = formatRelativeManifestPath(recommendation.sourceManifestPath)
+        val advisoryDetails = recommendation.advisories.joinToString("\n\n") { advisory ->
+            formatAdvisoryDetail(advisory)
+        }
         return buildString {
             appendLine(DependencyNinjaBundle.message("toolwindow.detail.package", recommendation.packageName))
-            appendLine(DependencyNinjaBundle.message("toolwindow.detail.manifest", recommendation.sourceManifestPath))
-            appendLine(DependencyNinjaBundle.message("toolwindow.detail.current", recommendation.currentVersion))
+            appendLine(DependencyNinjaBundle.message("toolwindow.detail.manifest.relative", relativeManifestPath))
+            appendLine(DependencyNinjaBundle.message("toolwindow.detail.manifest.absolute", recommendation.sourceManifestPath))
+            appendLine(DependencyNinjaBundle.message("toolwindow.detail.installed", recommendation.currentVersion))
             appendLine(DependencyNinjaBundle.message("toolwindow.detail.recommended", recommendedVersion))
             appendLine(DependencyNinjaBundle.message("toolwindow.detail.status", DependencyNinjaBundle.message("status.${recommendation.status.name.lowercase()}")))
             appendLine(DependencyNinjaBundle.message("toolwindow.detail.freshness", DependencyNinjaBundle.message("freshness.${recommendation.freshnessState.name.lowercase()}")))
             appendLine(DependencyNinjaBundle.message("toolwindow.detail.editability", editability))
-            append(DependencyNinjaBundle.message("toolwindow.detail.reason", reasonSummary))
+            appendLine(DependencyNinjaBundle.message("toolwindow.detail.reason", buildReasonSummary(recommendation)))
+            if (advisoryDetails.isNotBlank()) {
+                appendLine()
+                appendLine(DependencyNinjaBundle.message("toolwindow.detail.advisories"))
+                append(advisoryDetails)
+            }
+        }
+    }
+
+    private fun formatAdvisoryDetail(advisory: AdvisoryRecord): String {
+        return buildString {
+            appendLine(DependencyNinjaBundle.message("toolwindow.detail.advisory.severity", advisory.severityLabel))
+            appendLine(DependencyNinjaBundle.message("toolwindow.detail.advisory.id", advisory.advisoryId))
+            appendLine(DependencyNinjaBundle.message("toolwindow.detail.advisory.summary", advisory.summary))
+            appendLine(
+                DependencyNinjaBundle.message(
+                    "toolwindow.detail.advisory.affectedRange",
+                    advisory.affectedRange.ifBlank { DependencyNinjaBundle.message("status.none") },
+                ),
+            )
+            append(
+                DependencyNinjaBundle.message(
+                    "toolwindow.detail.advisory.fixedVersions",
+                    advisory.fixedVersions.joinToString(", ").ifBlank { DependencyNinjaBundle.message("status.none") },
+                ),
+            )
+        }
+    }
+
+    private fun buildReasonSummary(recommendation: RecommendationRecord): String {
+        val reasons = recommendation.visibleReasonCodes()
+            .joinToString(", ") { reasonCode ->
+                DependencyNinjaBundle.message("reason.${reasonCode.name.lowercase()}")
+            }
+        return reasons.ifBlank { DependencyNinjaBundle.message("reason.none") }
+    }
+
+    private fun formatRelativeManifestPath(absoluteManifestPath: String): String {
+        val basePath = project.basePath ?: return absoluteManifestPath.substringAfterLast('/')
+        val normalizedBasePath = if (basePath.endsWith("/")) basePath else "$basePath/"
+        return if (absoluteManifestPath.startsWith(normalizedBasePath)) {
+            absoluteManifestPath.removePrefix(normalizedBasePath)
+        } else {
+            absoluteManifestPath.substringAfterLast('/')
+        }
+    }
+
+    private fun truncateForRow(text: String): String {
+        val normalizedText = text.replace(Regex("\\s+"), " ").trim()
+        return if (normalizedText.length > MAX_ROW_SUMMARY_LENGTH) {
+            normalizedText.take(MAX_ROW_SUMMARY_LENGTH - 3) + "..."
+        } else {
+            normalizedText
         }
     }
 
@@ -198,17 +274,31 @@ private class DependencyToolWindowPanel(project: Project) : JPanel(BorderLayout(
         }
     }
 
-    private inner class RecommendationListRenderer : DefaultListCellRenderer() {
+    private inner class RecommendationListRenderer : JTextArea(), javax.swing.ListCellRenderer<RecommendationRecord> {
+        init {
+            isOpaque = true
+            isEditable = false
+            lineWrap = false
+            wrapStyleWord = false
+            border = EmptyBorder(6, 8, 6, 8)
+        }
+
         override fun getListCellRendererComponent(
-            list: JList<*>,
-            value: Any?,
+            list: JList<out RecommendationRecord>,
+            value: RecommendationRecord,
             index: Int,
             isSelected: Boolean,
             cellHasFocus: Boolean,
         ): Component {
-            val component = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
-            text = (value as? RecommendationRecord)?.let(::formatRecommendationRow).orEmpty()
-            return component
+            font = list.font
+            text = formatRecommendationRow(value)
+            background = if (isSelected) list.selectionBackground else list.background
+            foreground = if (isSelected) list.selectionForeground else list.foreground
+            return this
         }
+    }
+
+    companion object {
+        private const val MAX_ROW_SUMMARY_LENGTH = 84
     }
 }

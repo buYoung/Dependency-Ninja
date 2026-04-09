@@ -72,6 +72,12 @@ class DependencyOutdatedAnnotator : Annotator {
                 ReasonCode.UP_TO_DATE,
                 -> null
 
+                ReasonCode.ADVISORY_FLAGGED -> {
+                    recommendation.advisorySummary?.let {
+                        DependencyNinjaBundle.message("reason.advisory_flagged_with_summary", it)
+                    } ?: DependencyNinjaBundle.message("reason.${reasonCode.name.lowercase()}")
+                }
+
                 else -> DependencyNinjaBundle.message("reason.${reasonCode.name.lowercase()}")
             }
         }
