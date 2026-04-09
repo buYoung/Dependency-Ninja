@@ -202,24 +202,31 @@ class DependencyUpdateResolver(
             releaseAgeRule.resolveMinimumAgeDays(null)
         }
 
-        val eligibleVersions = effectiveObservation.availableVersions.filter { candidateVersion ->
-            val prereleaseAllowed = profile.allowedChannels.contains(StabilityChannel.PRERELEASE) || !candidateVersion.contains('-')
-            if (!prereleaseAllowed) {
-                reasons += ReasonCode.STABILITY_BLOCKED
+        val newerVersionPolicyChecks = effectiveObservation.availableVersions
+            .filter { candidateVersion -> VersionComparator.compare(currentVersion, candidateVersion) < 0 }
+            .map { candidateVersion ->
+                val prereleaseAllowed = profile.allowedChannels.contains(StabilityChannel.PRERELEASE) || !candidateVersion.contains('-')
+                val ageAllowed = releaseAgeRule.isExcluded(packageName) || candidateIsOldEnough(
+                    candidateVersion = candidateVersion,
+                    releaseTimestamps = effectiveObservation.releaseTimestamps,
+                    minimumAgeDays = minimumAgeDays,
+                )
+                CandidatePolicyCheck(
+                    version = candidateVersion,
+                    prereleaseAllowed = prereleaseAllowed,
+                    ageAllowed = ageAllowed,
+                )
             }
 
-            val ageAllowed = releaseAgeRule.isExcluded(packageName) || candidateIsOldEnough(
-                candidateVersion = candidateVersion,
-                releaseTimestamps = effectiveObservation.releaseTimestamps,
-                minimumAgeDays = minimumAgeDays,
-            )
-            if (!ageAllowed) {
-                reasons += ReasonCode.RELEASE_AGE_BLOCKED
+        val recommendedVersion = newerVersionPolicyChecks.firstOrNull { it.isAllowed }?.version
+        val blockedReasons = buildSet {
+            if (newerVersionPolicyChecks.any { !it.prereleaseAllowed }) {
+                add(ReasonCode.STABILITY_BLOCKED)
             }
-            prereleaseAllowed && ageAllowed
+            if (newerVersionPolicyChecks.any { !it.ageAllowed }) {
+                add(ReasonCode.RELEASE_AGE_BLOCKED)
+            }
         }
-
-        val recommendedVersion = eligibleVersions.firstOrNull()
         val advisoryFlagged = advisories.isNotEmpty()
         if (advisoryFlagged) {
             reasons += ReasonCode.ADVISORY_FLAGGED
@@ -239,6 +246,11 @@ class DependencyUpdateResolver(
             FreshnessState.FRESH -> null
         }
         if (freshnessAdjustedStatus != null) {
+            if (recommendedVersion != null) {
+                reasons += ReasonCode.UPDATE_AVAILABLE
+            } else if (newerVersionPolicyChecks.isNotEmpty()) {
+                reasons += blockedReasons
+            }
             return recommendation(
                 declarationId = declarationId,
                 workspaceReferenceId = workspaceReferenceId,
@@ -264,13 +276,14 @@ class DependencyUpdateResolver(
 
         val status = when {
             advisoryFlagged -> DependencyStatus.RISKY
-            recommendedVersion == null -> DependencyStatus.BLOCKED
-            VersionComparator.compare(currentVersion, recommendedVersion) < 0 -> DependencyStatus.OUTDATED
+            recommendedVersion != null -> DependencyStatus.OUTDATED
+            newerVersionPolicyChecks.isNotEmpty() -> DependencyStatus.BLOCKED
             else -> DependencyStatus.UP_TO_DATE
         }
         when (status) {
             DependencyStatus.OUTDATED -> reasons += ReasonCode.UPDATE_AVAILABLE
             DependencyStatus.UP_TO_DATE -> reasons += ReasonCode.UP_TO_DATE
+            DependencyStatus.BLOCKED -> reasons += blockedReasons
             else -> Unit
         }
 
@@ -354,5 +367,14 @@ class DependencyUpdateResolver(
                 VersionComparator.classifyUpdate(currentVersion, recommendedVersion)
             },
         )
+    }
+
+    private data class CandidatePolicyCheck(
+        val version: String,
+        val prereleaseAllowed: Boolean,
+        val ageAllowed: Boolean,
+    ) {
+        val isAllowed: Boolean
+            get() = prereleaseAllowed && ageAllowed
     }
 }

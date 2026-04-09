@@ -1,6 +1,8 @@
 package com.github.buyoung.dependencyninja.features.inspection.presentation
 
 import com.github.buyoung.dependencyninja.DependencyNinjaBundle
+import com.github.buyoung.dependencyninja.core.shared.domain.shouldAppearInInspection
+import com.github.buyoung.dependencyninja.core.shared.domain.supportsUpdateAction
 import com.github.buyoung.dependencyninja.services.DependencyNinjaProjectService
 import com.github.buyoung.dependencyninja.features.updateWorkflow.application.UpdatePreviewService
 import com.github.buyoung.dependencyninja.features.updateWorkflow.domain.UpdateExecutionMode
@@ -12,9 +14,9 @@ import com.intellij.codeInspection.ProblemsHolder
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
+import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiElementVisitor
 import com.intellij.psi.PsiFile
-import com.intellij.psi.PsiElement
 
 class DependencyRecommendationInspection : LocalInspectionTool() {
     override fun buildVisitor(
@@ -25,17 +27,19 @@ class DependencyRecommendationInspection : LocalInspectionTool() {
             override fun visitFile(file: PsiFile) {
                 val service = file.project.service<DependencyNinjaProjectService>()
                 service.recommendationsForManifest(file.virtualFile?.path ?: return)
-                    .filter { it.surfaceAvailability.inspection }
+                    .filter { it.shouldAppearInInspection() && it.supportsUpdateAction() }
                     .forEach { recommendation ->
                         val targetElement = recommendation.versionRange
                             ?.let { file.findElementAt(it.startOffset) }
                             ?: file as PsiElement
+                        val recommendedVersion = recommendation.recommendedVersion ?: return@forEach
                         holder.registerProblem(
                             targetElement,
                             DependencyNinjaBundle.message(
-                                "inspection.description",
+                                "inspection.description.withUpgrade",
                                 recommendation.packageName,
-                                recommendation.recommendedVersion ?: DependencyNinjaBundle.message("status.none"),
+                                recommendation.currentVersion,
+                                recommendedVersion,
                             ),
                             ProblemHighlightType.GENERIC_ERROR_OR_WARNING,
                             UpdateDependencyQuickFix(recommendation.recommendationId),
@@ -61,7 +65,9 @@ class UpdateDependencyQuickFix(
             executionMode = UpdateExecutionMode.MANIFEST_ONLY,
         )
         val previewItem = previewBatch.items.singleOrNull() ?: return
-        val warningMessage = previewItem.warningFlags.joinToString(", ") { it.name }
+        val warningMessage = previewItem.warningFlags.joinToString(", ") {
+            DependencyNinjaBundle.message("warning.${it.name.lowercase()}")
+        }
         val previewMessage = buildString {
             appendLine(DependencyNinjaBundle.message("inspection.preview.target", previewItem.targetManifestPath))
             appendLine(DependencyNinjaBundle.message("inspection.preview.change", previewItem.fromVersionText, previewItem.toVersionText))

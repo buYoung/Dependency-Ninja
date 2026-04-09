@@ -13,19 +13,34 @@ class UpdateWorkflowPanel : JPanel(BorderLayout()) {
 
     init {
         previewArea.isEditable = false
+        previewArea.lineWrap = true
+        previewArea.wrapStyleWord = true
         add(previewArea, BorderLayout.CENTER)
     }
 
     fun renderPreview(previewBatch: PreviewBatch) {
         currentPreviewBatch = previewBatch
         previewArea.text = buildString {
-            if (previewBatch.summary != null) {
-                appendLine(DependencyNinjaBundle.message("toolwindow.preview.summary", previewBatch.summary))
+            if (previewBatch.requiresSoftCapAcknowledgement) {
+                appendLine(DependencyNinjaBundle.message("toolwindow.preview.summary", DependencyNinjaBundle.message("toolwindow.bulkSoftCap", previewBatch.softCap.toString())))
+            }
+            if (previewBatch.nonActionableCount > 0) {
+                appendLine(DependencyNinjaBundle.message("toolwindow.preview.skipped", previewBatch.nonActionableCount))
+            }
+            if (previewBatch.items.isEmpty()) {
+                appendLine(DependencyNinjaBundle.message("toolwindow.preview.noActionableSelection"))
             }
             previewBatch.items.forEach { item ->
                 appendLine(DependencyNinjaBundle.message("toolwindow.preview.item", item.packageName, item.fromVersionText, item.toVersionText))
                 if (item.warningFlags.isNotEmpty()) {
-                    appendLine(DependencyNinjaBundle.message("toolwindow.preview.warnings", item.warningFlags.joinToString(", ")))
+                    appendLine(
+                        DependencyNinjaBundle.message(
+                            "toolwindow.preview.warnings",
+                            item.warningFlags.joinToString(", ") { warningFlag ->
+                                DependencyNinjaBundle.message("warning.${warningFlag.name.lowercase()}")
+                            },
+                        ),
+                    )
                 }
             }
         }

@@ -2,6 +2,7 @@ package com.github.buyoung.dependencyninja.features.updateWorkflow.application
 
 import com.github.buyoung.dependencyninja.core.shared.domain.FreshnessState
 import com.github.buyoung.dependencyninja.core.shared.domain.RecommendationRecord
+import com.github.buyoung.dependencyninja.core.shared.domain.supportsUpdateAction
 import com.github.buyoung.dependencyninja.features.settings.application.PolicyProfileService
 import com.github.buyoung.dependencyninja.features.updateWorkflow.domain.UpdateExecutionMode
 import com.github.buyoung.dependencyninja.features.updateWorkflow.domain.UpdatePreviewItem
@@ -31,17 +32,15 @@ class UpdatePreviewService(
         acknowledgeSoftCap: Boolean = false,
     ): PreviewBatch {
         val recommendations = recommendationIds.mapNotNull(projectService::findRecommendation)
-        val items = recommendations.map { buildPreview(it, executionMode) }
+        val actionableRecommendations = recommendations.filter { it.supportsUpdateAction() }
+        val items = actionableRecommendations.map { buildPreview(it, executionMode) }
         val softCap = policyProfileService.currentProfile().bulkApplySoftCap
         val requiresSoftCapAcknowledgement = items.size > softCap && !acknowledgeSoftCap
         return PreviewBatch(
             items = items,
             requiresSoftCapAcknowledgement = requiresSoftCapAcknowledgement,
-            summary = if (requiresSoftCapAcknowledgement) {
-                "bulk-soft-cap:$softCap"
-            } else {
-                null
-            },
+            softCap = softCap,
+            nonActionableCount = recommendations.size - actionableRecommendations.size,
         )
     }
 
@@ -120,5 +119,6 @@ class UpdatePreviewService(
 data class PreviewBatch(
     val items: List<UpdatePreviewItem>,
     val requiresSoftCapAcknowledgement: Boolean,
-    val summary: String?,
+    val softCap: Int,
+    val nonActionableCount: Int = 0,
 )
